@@ -1,0 +1,6 @@
+-r requirements.txt
+youtube-transcript-api>=1.2,<2
+yt-dlp[default]
+pillow>=10.4
+numpy>=1.26
+imagehash>=4.3
