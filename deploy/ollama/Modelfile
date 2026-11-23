@@ -1,0 +1,7 @@
+# Self-hosted model used in our tests: Qwen3-VL-30B-A3B (MoE, ~3B active params; text + vision in one model).
+#   ollama pull qwen3-vl:30b-a3b-instruct
+#   ollama create nt-qwen3vl-30b -f deploy/ollama/Modelfile
+# num_ctx 8192 keeps the KV cache small when the server runs several requests in parallel
+# (OLLAMA_NUM_PARALLEL multiplies it). Pair with LLM_CHUNK_CHARS=12000 and VISION_BATCH=4.
+FROM qwen3-vl:30b-a3b-instruct
+PARAMETER num_ctx 8192

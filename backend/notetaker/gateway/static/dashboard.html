@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Notes Ops Console</title>
+<style>
+:root{--bg:#f6f6fa;--card:#fff;--text:#1d1c2b;--muted:#6c6b80;--line:#e5e4ef;--accent:#6d5efc;--ok:#1f9d55;--warn:#b07400;--err:#c0392b;--soft:#efeefe}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#13121a;--card:#1d1c27;--text:#ebeaf4;--muted:#9998ae;--line:#2d2c3b;--accent:#8f84ff;--ok:#4cd18a;--warn:#f0bf4c;--err:#ff7b6e;--soft:#26243e}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+h1{font-size:16px;margin:0}h2{font-size:13px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+main{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;padding:16px 20px;max-width:1400px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;min-width:0}
+.c4{grid-column:span 4}.c8{grid-column:span 8}.c12{grid-column:span 12}.c6{grid-column:span 6}
+@media(max-width:900px){.c4,.c6,.c8{grid-column:span 12}}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600;font-size:11.5px}
+.num{font-variant-numeric:tabular-nums;text-align:right}
+.badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:650;background:var(--soft);color:var(--accent);white-space:nowrap}
+.b-COMPLETED{background:#e3f6ea;color:var(--ok)}.b-COMPLETED_WITH_WARNINGS{background:#fff3d6;color:var(--warn)}.b-FAILED,.b-DEAD_LETTERED{background:#fde9e7;color:var(--err)}
+@media (prefers-color-scheme:dark){.b-COMPLETED{background:#163324}.b-COMPLETED_WITH_WARNINGS{background:#3a2f12}.b-FAILED,.b-DEAD_LETTERED{background:#3d1c1a}}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px}
+button,input,select{font:inherit;color:inherit}button{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:5px 10px;cursor:pointer;font-weight:600}
+button:hover{border-color:var(--accent)}button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}button.danger{border-color:var(--err);color:var(--err)}
+input,select{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:5px 8px}
+.muted{color:var(--muted)}.small{font-size:11.5px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+.faults{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+.tl{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--line);min-width:160px}.tl span{height:100%}
+.legend span{display:inline-flex;align-items:center;gap:4px;margin-right:10px}.legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
+.kpis{display:flex;gap:18px;flex-wrap:wrap}.kpi b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.kpi span{color:var(--muted);font-size:11.5px}
+.wrap{overflow-x:auto}
+#auth{display:flex;gap:6px;align-items:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎓 Video Notes · Ops Console</h1>
+  <div id="auth"><span class="muted small">Admin token</span><input id="tok" type="password" size="14" /><button id="save">Use</button><span id="health" class="small"></span></div>
+</header>
+<main>
+  <section class="card c12"><div class="kpis" id="kpis"></div></section>
+
+  <section class="card c4"><h2>Workers</h2><div id="workers" class="wrap"></div></section>
+  <section class="card c8"><h2>Queues</h2><div id="queues" class="wrap"></div></section>
+
+  <section class="card c4">
+    <h2>Fault injection</h2>
+    <div class="faults">
+      <span>Force next N LLM calls → 429</span><span><input id="f-llm" type="number" min="0" value="2" style="width:56px"> <button data-f="llm_429">Arm</button></span>
+      <span>Force next N Notion calls → 429</span><span><input id="f-notion" type="number" min="0" value="2" style="width:56px"> <button data-f="notion_429">Arm</button></span>
+      <span>Force next N YouTube calls → 429</span><span><input id="f-youtube" type="number" min="0" value="1" style="width:56px"> <button data-f="youtube_429">Arm</button></span>
+      <span>Frame failure rate</span><span><input id="f-rate" type="number" min="0" max="1" step="0.1" value="0.5" style="width:56px"> <button data-f="frame_fail_rate">Set</button></span>
+      <span>All frames fail (text-only page)</span><span><button data-f="frame_fail_all">Arm</button></span>
+      <span>Crash worker mid-stage</span><span><select id="f-crash"><option>frames</option><option>summarize</option><option>publish</option><option>transcribe</option></select> <button data-f="crash_stage">Arm</button></span>
+    </div>
+    <p class="small muted" id="faults-now">Active: none</p>
+    <button class="danger" id="clear-faults">Clear all faults</button>
+  </section>
+
+  <section class="card c8"><h2>Dead-letter queue</h2><div id="dlq" class="wrap"></div></section>
+
+  <section class="card c12">
+    <h2>Recent jobs</h2>
+    <div class="legend small muted" id="legend"></div>
+    <div id="jobs" class="wrap"></div>
+  </section>
+  <section class="card c12"><h2>Config</h2><div id="config" class="mono small"></div></section>
+</main>
+<script>
+const COLORS={QUEUED:"#a0a0b8",TRANSCRIBING:"#5aa9e6",SUMMARIZING:"#8f84ff",EXTRACTING_FRAMES:"#f29e4c",PUBLISHING:"#43b581"};
+let TOKEN=""; try{TOKEN=localStorage.getItem("nt-admin")||"dev-admin"}catch{TOKEN="dev-admin"}
+const $=s=>document.querySelector(s); $("#tok").value=TOKEN;
+$("#save").onclick=()=>{TOKEN=$("#tok").value;try{localStorage.setItem("nt-admin",TOKEN)}catch{};refresh()};
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ago=t=>{const d=Date.now()/1000-t;return d<60?Math.round(d)+"s":d<3600?Math.round(d/60)+"m":Math.round(d/3600)+"h"};
+const fmt=s=>{s=Math.max(0,Math.round(s));return s<60?s+"s":Math.floor(s/60)+"m"+String(s%60).padStart(2,"0")+"s"};
+async function api(path,opt={}){const r=await fetch(path,{...opt,headers:{"Content-Type":"application/json","X-Admin-Token":TOKEN,...(opt.headers||{})}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j?.error?.message||r.status);return j}
+$("#legend").innerHTML=Object.entries(COLORS).map(([k,c])=>`<span><i style="background:${c}"></i>${k}</span>`).join("");
+document.querySelectorAll("[data-f]").forEach(b=>b.onclick=async()=>{
+  const f=b.dataset.f, v={llm_429:+$("#f-llm").value,notion_429:+$("#f-notion").value,youtube_429:+$("#f-youtube").value,frame_fail_rate:+$("#f-rate").value,frame_fail_all:true,crash_stage:$("#f-crash").value}[f];
+  await api("/admin/faults",{method:"POST",body:JSON.stringify({[f]:v})});refresh()});
+$("#clear-faults").onclick=async()=>{await api("/admin/faults",{method:"DELETE"});refresh()};
+async function replay(id){try{await api(`/admin/dlq/${id}/replay`,{method:"POST"});refresh()}catch(e){alert(e.message)}}
+window.replay=replay;
+function timeline(j){
+  const tl=j.timeline||[];if(!tl.length)return"";const end=["COMPLETED","COMPLETED_WITH_WARNINGS","FAILED","DEAD_LETTERED"].includes(j.status)?tl[tl.length-1].at:Date.now()/1000;
+  const total=Math.max(end-tl[0].at,0.001);let html="";
+  for(let i=0;i<tl.length;i++){const s=tl[i];if(!COLORS[s.status])continue;const nx=i+1<tl.length?tl[i+1].at:end;html+=`<span title="${s.status} ${fmt(nx-s.at)} (${esc((s.worker||'').split(':')[0])})" style="width:${(nx-s.at)/total*100}%;background:${COLORS[s.status]}"></span>`}
+  return `<div class="tl">${html}</div><div class="small muted">${fmt(total)}</div>`}
+async function refresh(){
+  let h;try{h=await (await fetch("/healthz")).json()}catch{h={status:"down"}}
+  $("#health").innerHTML=`<span class="dot" style="background:${h.status==="ok"?"var(--ok)":h.status==="degraded"?"var(--warn)":"var(--err)"}"></span>${h.status}`;
+  let o,jobs;try{[o,jobs]=await Promise.all([api("/admin/overview"),api("/jobs?limit=40")])}catch(e){$("#kpis").innerHTML=`<span class="muted">${esc(e.message)} — check the admin token.</span>`;return}
+  const m=o.metrics||{};const by={};(jobs.jobs||[]).forEach(j=>by[j.status]=(by[j.status]||0)+1);
+  const k=[["Submitted",m.jobs_submitted||0],["Completed",(m.jobs_completed||0)+(m.jobs_completed_with_warnings||0)],["Dead-lettered",m.jobs_dead_lettered||0],["Failed",m.jobs_failed||0],["In flight",(jobs.jobs||[]).filter(j=>!["COMPLETED","COMPLETED_WITH_WARNINGS","FAILED","DEAD_LETTERED"].includes(j.status)).length],["LLM calls",m.llm_calls||0],["Provider 429s (LLM)",m.llm_provider_429||0],["Injected 429s",(m.llm_injected_429||0)+(m.youtube_injected_429||0)],["Crash recoveries",m.recoveries||0]];
+  $("#kpis").innerHTML=k.map(([a,b])=>`<div class="kpi"><b>${b}</b><span>${a}</span></div>`).join("");
+  $("#workers").innerHTML=o.workers.length?`<table><tr><th>Worker</th><th>Stages</th><th>Busy with</th><th class="num">Done</th></tr>${o.workers.map(w=>`<tr><td class="mono"><span class="dot"></span>${esc(w.id.split(":")[0])}</td><td class="small">${w.stages.length===4?"all":esc(w.stages.join(", "))}</td><td class="small">${(w.inflight||[]).map(f=>`${esc(f.job_id.slice(0,8))}·${esc(f.stage)}`).join("<br>")||'<span class="muted">idle</span>'}</td><td class="num">${w.processed}</td></tr>`).join("")}</table>`:'<p class="muted">No live workers.</p>';
+  $("#queues").innerHTML=`<table><tr><th>Queue</th><th class="num">Ready</th><th class="num">Unacked</th><th class="num">Consumers</th></tr>${o.queues.sort((a,b)=>a.name.localeCompare(b.name)).map(q=>`<tr><td class="mono">${esc(q.name)}</td><td class="num">${q.ready}</td><td class="num">${q.unacked??"–"}</td><td class="num">${q.consumers??"–"}</td></tr>`).join("")}</table>`;
+  const f=o.faults||{};$("#faults-now").textContent="Active: "+(Object.keys(f).length?Object.entries(f).map(([a,b])=>`${a}=${b}`).join(", "):"none");
+  const dl=(jobs.jobs||[]).filter(j=>j.status==="DEAD_LETTERED"||j.status==="FAILED");
+  $("#dlq").innerHTML=dl.length?`<table><tr><th>Job</th><th>Video</th><th>Status</th><th>Reason</th><th></th></tr>${dl.map(j=>`<tr><td class="mono">${j.job_id.slice(0,8)}</td><td>${esc(j.video_title||j.video_id)}</td><td><span class="badge b-${j.status}">${j.status}</span></td><td class="small">${esc(j.error?.code)}: ${esc(j.error?.message)}</td><td>${j.status==="DEAD_LETTERED"?`<button class="primary" onclick="replay('${j.job_id}')">Replay</button>`:""}</td></tr>`).join("")}</table>`:'<p class="muted">Empty — nothing has exhausted its retry budget.</p>';
+  $("#jobs").innerHTML=`<table><tr><th>Job</th><th>Video</th><th>Status</th><th class="num">%</th><th>Timeline</th><th>Frames</th><th>Notes</th><th>Age</th></tr>${(jobs.jobs||[]).map(j=>{
+    const ev=(j.events||[]).slice(-1)[0];const retry=j.retry?`⏳ ${esc(j.retry.code)} → retry ${j.retry.attempt}/${j.retry.max_attempts} in ${Math.max(0,Math.round(j.retry.retry_at-Date.now()/1000))}s`:"";
+    return `<tr><td class="mono">${j.job_id.slice(0,8)}<div class="muted">${esc((j.worker||"").split(":")[0])}</div></td><td>${esc(j.video_title||j.video_id)}<div class="small muted">${j.duration_sec?fmt(j.duration_sec):""}</div></td><td><span class="badge b-${j.status}">${j.status}</span></td><td class="num">${j.progress}</td><td>${timeline(j)}</td><td class="small">${j.result?`${j.result.frames_published}/${j.result.frames_requested}`:(j.frames_requested??"")}</td><td class="small">${retry||esc(ev?.message||"")}${j.warnings?.length?`<div style="color:var(--warn)">${j.warnings.length} warning(s)</div>`:""}${j.result?.notion_page_url?`<div><a href="${esc(j.result.notion_page_url)}" target="_blank" rel="noopener">Notion ↗</a></div>`:""}</td><td class="small muted">${ago(j.created_at)}</td></tr>`}).join("")}</table>`;
+  $("#config").textContent=JSON.stringify(o.config);
+}
+refresh();setInterval(refresh,2000);
+</script>
+</body>
+</html>

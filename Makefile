@@ -22,3 +22,5 @@ chaos:         ## make chaos URL=https://youtu.be/...  (kills the worker holding
 	python3 scripts/nt.py chaos "$(URL)"
 burst:         ## make burst URLS="url1 url2 ..."
 	python3 scripts/nt.py burst $(URLS)
+verify:        ## make verify JOB=<job_id> NOTION_TOKEN=...
+	docker compose exec -e NOTION_TOKEN=$(NOTION_TOKEN) worker python -m notetaker.tools.verify $(JOB)

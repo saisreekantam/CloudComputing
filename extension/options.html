@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video Notes Agent — Settings</title>
+  <link rel="stylesheet" href="popup.css" />
+  <style>
+    body { width: auto; max-height: none; max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 20px; margin: 0 0 4px; display: flex; gap: 10px; align-items: center; }
+    .lead { color: var(--muted); margin: 0 0 20px; }
+    section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+    h2 { font-size: 14px; margin: 0 0 10px; }
+    label { display: block; font-weight: 600; font-size: 12px; margin: 10px 0 4px; }
+    input, select { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+    .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .msg { margin-top: 10px; font-size: 12.5px; }
+    .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+    code { background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; word-break: break-all; }
+    details summary { cursor: pointer; color: var(--accent); font-weight: 600; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1><img src="icons/icon48.png" width="28" height="28" alt="" /> Video Notes Agent</h1>
+  <p class="lead">Settings are stored only in this browser.</p>
+
+  <section>
+    <h2>Notes server</h2>
+    <label for="gw">Gateway URL</label>
+    <input id="gw" type="url" placeholder="http://localhost:8000" />
+    <div class="row">
+      <button id="save-gw" class="btn primary" type="button">Save & test</button>
+      <span id="gw-msg" class="msg"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Notion</h2>
+    <div id="auth-state" class="hint"></div>
+    <div class="row">
+      <button id="connect" class="btn primary" type="button">Connect Notion (OAuth)</button>
+      <button id="disconnect" class="btn" type="button">Disconnect</button>
+    </div>
+    <div class="hint">OAuth redirect URI to register on your Notion public integration:<br /><code id="redirect"></code></div>
+    <details>
+      <summary>Use an internal integration token instead</summary>
+      <label for="tok">Internal integration secret</label>
+      <input id="tok" type="password" placeholder="ntn_… or secret_…" autocomplete="off" />
+      <div class="row"><button id="save-tok" class="btn" type="button">Save token</button></div>
+      <div class="hint">Remember to share at least one page with the integration (page ••• → Connections).</div>
+    </details>
+    <div id="auth-msg" class="msg"></div>
+  </section>
+
+  <section>
+    <h2>Destination</h2>
+    <label for="parent">Publish notes under</label>
+    <select id="parent"><option value="">Default — a “📚 Video Notes” page (created automatically)</option></select>
+    <div class="row">
+      <button id="load-pages" class="btn" type="button">Refresh page list</button>
+      <button id="save-parent" class="btn primary" type="button">Save destination</button>
+      <span id="parent-msg" class="msg"></span>
+    </div>
+  </section>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

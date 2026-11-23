@@ -1,0 +1,71 @@
+/* "Take Notes" pill inside the YouTube player toolbar. */
+#movie_player .ytp-right-controls .vna-btn {
+  position: relative;
+  width: auto !important;
+  min-width: 48px;
+  padding: 0 12px 0 10px !important;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  vertical-align: top;
+  color: #fff;
+  font: 500 13px/1 "Roboto", "Arial", sans-serif;
+  letter-spacing: 0.2px;
+  opacity: 0.95;
+  overflow: hidden;
+  isolation: isolate;
+}
+#movie_player .vna-btn svg { flex: none; }
+#movie_player .vna-btn .vna-label { white-space: nowrap; text-shadow: 0 0 2px rgba(0, 0, 0, 0.5); }
+#movie_player .vna-btn::before {
+  content: "";
+  position: absolute;
+  inset: 9px 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  z-index: -1;
+  transition: background 0.15s;
+}
+#movie_player .vna-btn:hover::before { background: rgba(255, 255, 255, 0.24); }
+#movie_player .vna-btn .vna-bar {
+  position: absolute;
+  left: 8px;
+  bottom: 9px;
+  height: 2px;
+  width: calc((100% - 16px) * var(--vna-progress, 0) / 100);
+  max-width: calc(100% - 16px);
+  background: #a99dff;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+#movie_player .vna-btn[data-state="active"] svg { animation: vna-pulse 1.4s ease-in-out infinite; }
+#movie_player .vna-btn[data-state="done"]::before { background: rgba(46, 204, 113, 0.32); }
+#movie_player .vna-btn[data-state="warn"]::before { background: rgba(241, 196, 15, 0.32); }
+#movie_player .vna-btn[data-state="error"]::before { background: rgba(231, 76, 60, 0.38); }
+#movie_player .vna-btn[data-state="done"] .vna-bar,
+#movie_player .vna-btn[data-state="warn"] .vna-bar,
+#movie_player .vna-btn[data-state="error"] .vna-bar { display: none; }
+
+@keyframes vna-pulse { 50% { opacity: 0.45; } }
+
+.vna-toast {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 70;
+  max-width: 340px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(20, 20, 28, 0.92);
+  color: #fff;
+  font: 500 13px/1.4 "Roboto", "Arial", sans-serif;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  border-left: 3px solid #a99dff;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+}
+.vna-toast.vna-show { opacity: 1; transform: none; }
+.vna-toast[data-kind="ok"] { border-left-color: #2ecc71; }
+.vna-toast[data-kind="error"] { border-left-color: #e74c3c; }

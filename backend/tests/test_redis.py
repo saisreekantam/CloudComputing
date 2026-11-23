@@ -146,6 +146,29 @@ async def test_metrics_mix_int_counters_and_float_durations(store):
     assert m["ratelimit_wait_sec:llm"] == 30.656
 
 
+async def test_cross_video_concept_index(store):
+    from notetaker.graph import forget_page, register_page, related_pages
+    g1 = {"concepts": [{"name": "Neuron", "definition": "holds an activation"},
+                       {"name": "Sigmoid", "definition": "squashing function"}]}
+    g2 = {"concepts": [{"name": "Neurons", "definition": "units of a network"},
+                       {"name": "Backprop", "definition": "computes gradients of the cost"}]}
+    tok = "ntn_test_" + "x" * 30
+    await register_page(store.r, tok, "vid1", {"id": "p1", "url": "u1"}, "Video 1", g1)
+    await register_page(store.r, tok, "vid1", {"id": "p1b", "url": "u1"}, "Video 1", g1)  # replay overwrites
+    rel = await related_pages(store.r, tok, "vid2", g2)
+    assert len(rel) == 1 and rel[0]["page_id"] == "p1b" and rel[0]["shared"] == ["Neuron"]
+    # Different names, same idea: a concept of one video appearing in the other's definitions counts.
+    g3 = {"concepts": [{"name": "Gradient descent", "definition": "follows the gradient to minimise the cost functions"}]}
+    g4 = {"concepts": [{"name": "Cost function", "definition": "measures error"}]}
+    await register_page(store.r, tok, "vid3", {"id": "p3", "url": "u3"}, "Video 3", g3)
+    rel = await related_pages(store.r, tok, "vid4", g4)
+    assert [e["video_id"] for e in rel] == ["vid3"] and rel[0]["shared"] == ["Cost function"]
+    await forget_page(store.r, tok, "vid3")
+    assert await related_pages(store.r, tok, "vid1", g1) == []  # never links to itself
+    await forget_page(store.r, tok, "vid1")
+    assert await related_pages(store.r, tok, "vid2", g2) == []
+
+
 async def test_transcript_cache_round_trip(store):
     vid = "cache" + uuid.uuid4().hex[:6]
     assert await store.get_cached_transcript(vid) is None

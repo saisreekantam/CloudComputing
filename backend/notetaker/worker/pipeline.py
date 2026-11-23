@@ -606,7 +606,7 @@ async def publish(ctx: Ctx) -> None:
         related = await _related_pages(ctx, client, token, raw["video_id"], synthesis.get("graph") or {})
         blocks = build_blocks(job, synthesis, frame_list, upload_ids, omitted, related)
         await client.append(page["id"], blocks)
-        if (synthesis.get("graph") or {}).get("concepts"):
+        if synthesis.get("graph"):
             from ..graph import register_page
             await register_page(ctx.store.r, token, raw["video_id"], page, title, synthesis["graph"])
     finally:

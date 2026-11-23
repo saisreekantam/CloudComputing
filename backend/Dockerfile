@@ -19,6 +19,10 @@ RUN apt-get update \
 COPY --from=denoland/deno:bin-2.1.4 /deno /usr/local/bin/deno
 COPY requirements-worker.txt .
 RUN pip install -r requirements-worker.txt && pip install -U "yt-dlp[default]"
+# Bake the speech-to-text model into the image so the fallback never downloads at job time.
+ARG ASR_MODEL=base
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('${ASR_MODEL}', device='cpu', compute_type='int8')"
+ENV HF_HUB_OFFLINE=1
 COPY notetaker ./notetaker
 # SIGTERM → graceful drain (see worker/main.py); compose gives it 40s.
 STOPSIGNAL SIGTERM

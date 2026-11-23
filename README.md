@@ -1,7 +1,8 @@
 # Distributed Multimodal Video Note-Taking Agent
 
 Click **Take Notes** on a YouTube video and get study notes in Notion: summary, timestamped sections, real key
-frames with vision-grounded captions, key terms and review questions. The work runs on a queue-backed worker pool that survives
+frames (chosen by scanning what is actually on screen) with captions, a concept map linked to your other video
+notes, key terms and review questions. The work runs on a queue-backed worker pool that survives
 worker crashes, rate limits and partial failures.
 
 ```
@@ -13,9 +14,9 @@ Chrome extension ──HTTP──▶ Gateway :8000 ──▶ RabbitMQ (quorum qu
 
 | | |
 |---|---|
-| **Base URL** | `http://localhost:8000` (RabbitMQ UI: `http://localhost:15672` notetaker/notetaker) |
+| **Base URL** | `http://localhost:8000` (dashboard: `http://localhost:8000/dashboard`, RabbitMQ UI: `http://localhost:15672` notetaker/notetaker) |
 | **Health check** | `GET /healthz` reports Redis, broker, live workers and config (HTTP 503 if Redis or the broker is down) |
-| **Open modules / roadmap** | [ROADMAP.md](ROADMAP.md) |
+| **Demo run sheet & measured results** | [DEMO.md](DEMO.md) |
 | **Default Notion destination** | If `notion_parent_id` is omitted: `NOTION_DEFAULT_PARENT_ID` when set **and shared with the token's integration**. Otherwise (or if that page is not visible to this user's OAuth workspace) the worker uses a page named **“📚 Video Notes”**, created once inside the most recently edited top-level page that the integration can access and then reused. A page or database can also be picked in the extension's Options. |
 
 ---
@@ -30,9 +31,26 @@ docker compose up -d --build  # rabbitmq + redis + gateway + 2 workers
 curl -s localhost:8000/healthz | python3 -m json.tool   # expect "status": "ok", workers.alive = 2
 ```
 
-**Choose an LLM** (any OpenAI-compatible endpoint; set these in `.env`). The default is Gemini 3.5 Flash-Lite with a
-free API key from <https://aistudio.google.com/apikey>: set `LLM_API_KEY` and keep `LLM_RPM=10` for the free tier.
-Use a key from a project **without** prepaid billing (otherwise: 402 "credits depleted").
+**Choose an LLM** (any OpenAI-compatible endpoint; set these in `.env`):
+
+| | Option A: hosted (simplest, recommended for grading) | Option B: self-hosted on a GPU (what we developed with) |
+|---|---|---|
+| Model | Gemini 3.5 Flash-Lite (free API key at <https://aistudio.google.com/apikey>) | Qwen3-VL-30B-A3B via Ollama (text + vision, open weights) |
+| `LLM_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai/` | `http://host.docker.internal:11435/v1` |
+| `LLM_API_KEY` | your key | `ollama` (any non-empty value) |
+| `LLM_MODEL` | `gemini-3.5-flash-lite` | `nt-qwen3vl-30b` (see `deploy/ollama/Modelfile`) |
+| Also set | `LLM_RPM=10` (free tier). Use a key from a project **without** prepaid billing (otherwise: 402 "credits depleted"); full Flash models were overloaded/unavailable on the free tier when tested | `LLM_RPM=30`, `LLM_CHUNK_CHARS=12000`, `LLM_TIMEOUT_SEC=300` |
+
+Option B on a remote GPU server reached over SSH:
+
+```bash
+export GPU_HOST=user@gpu-server            # key-based SSH
+scripts/gpu_tunnel.sh serve 2              # optional: private Ollama pinned to GPU 2 (useful on shared, busy servers)
+scripts/gpu_tunnel.sh up                   # forwards localhost:11435 and reconnects automatically
+scripts/gpu_tunnel.sh check                # "OK … serves nt-qwen3vl-30b", "100% on GPU"
+```
+
+If the tunnel or server is down, jobs wait in retries and then dead-letter; after `up`, replay them from the dashboard.
 
 **Notion OAuth app (one time):** at <https://www.notion.so/profile/integrations>, create a **public** integration
 (capabilities: read, update and insert content). Add this redirect URI exactly:
@@ -41,17 +59,19 @@ Use a key from a project **without** prepaid billing (otherwise: 402 "credits de
 https://affbfbcfcpadfbncfklibpgnpoahjlff.chromiumapp.org/notion
 ```
 
-The extension ID is pinned by the `key` in the extension manifest (see ROADMAP.md), so this URI is the same on every machine.
+The extension ID is pinned by the `key` in `extension/manifest.json`, so this URI is the same on every machine.
 Put the client ID and secret in `.env`, then run `docker compose up -d` again.
 
-**Without the extension**, submit jobs from the CLI or curl:
+> No public integration? Create an *internal* integration, share a page with it, and paste its `ntn_…` token in
+> the extension's **Options → “Use an internal integration token instead”**. Everything else works the same way.
 
-```bash
-python3 scripts/nt.py submit "https://www.youtube.com/watch?v=aircAruvnKk" --token ntn_...   # internal integration token
-```
+**Load the extension (no build step):** go to `chrome://extensions`, turn on Developer mode, click **Load unpacked**
+and select the `extension/` folder.
 
-> No public integration? Create an *internal* integration, share a page with it, and pass its `ntn_…` token as
-> `notion_token`. Everything else works the same way.
+**Use it:** open a YouTube video of 20 minutes or less and click **Take Notes** in the player toolbar. The first click
+starts the one-time Notion OAuth flow; the token is stored in `chrome.storage.local` and reused for later jobs. Follow
+progress from the toolbar icon (Queued → Transcribing → Summarizing → Extracting Frames → Publishing → Done),
+then click **View in Notion**.
 
 ---
 
@@ -69,16 +89,18 @@ All variables are set in `.env`. Only the first three are required.
 | `LLM_RPM` | `10` | **Configured global LLM rate limit**: requests/min shared by *all* workers |
 | `LLM_TPM` | `250000` | Global tokens/min shared by all workers |
 | `LLM_5XX_RETRIES` | `2` | In-call retries (2 s, 5 s) for brief provider 5xx such as 503 "high demand"; persistent 5xx → stage retry / DLQ |
-| `LLM_CONCURRENCY` | `3` | Parallel LLM calls inside one job (transcript chunks; reduce). Every call still passes the global limiter |
+| `LLM_CONCURRENCY` | `3` | Parallel LLM calls inside one job (transcript chunks; reduce ∥ concept graph). Every call still passes the global limiter |
 | `VISION_VERIFY` | `true` | Ground frame captions in the actual image (batched multimodal calls) |
 | `VISION_BATCH` | `4` | Frames per vision call — keep ≤4 for 8k-context self-hosted models; a failed batch only loses its own frames |
 | `LLM_CHUNK_CHARS` | `24000` | Transcript chunk size for map-reduce, in English-equivalent chars (non-Latin scripts weigh 3x). Use ~12000 for 8k-context self-hosted models; an over-full chunk is split and retried automatically |
-| `ASR_FALLBACK` | `false` | Speech-to-text fallback when captions are blocked or missing (module in progress, see ROADMAP.md) |
+| `ASR_FALLBACK` | `true` | If YouTube captions are blocked (IP rate limit) or missing, transcribe the audio locally with faster-whisper |
+| `ASR_MODEL` / `ASR_THREADS` | `base` / `8` | Whisper model baked into the worker image (`docker build --build-arg ASR_MODEL=small` for higher accuracy) and CPU threads |
 | `TRANSCRIPT_CACHE_DAYS` | `7` | Reuse a video's transcript across jobs; repeat videos make no YouTube caption request |
 | `NOTES_LANGUAGE` | `English` | Language of the notes; non-English transcripts are translated (technical terms kept) |
 | `MIN_FRAMES` | `3` | Minimum frames per page; topped up from weaker on-screen visuals, then one real frame per section (captioned by the vision model, dropped if no grounded caption) |
-| `VISUAL_SCAN` | `false` | Visual-first frame selection (module in progress, see ROADMAP.md); off = frames chosen from the transcript |
-| `CONCEPT_GRAPH` | `false` | Per-video concept map + cross-video links (module in progress, see ROADMAP.md) |
+| `VISUAL_SCAN` | `true` | Visual-first frame selection: scan the whole video at 240p (~2 s) and pick informative on-screen states (see §5) |
+| `VISUAL_CANDIDATES` | `16` | Candidate visuals sent to the vision model for triage (one contact-sheet image) |
+| `CONCEPT_GRAPH` | `true` | Build a per-video concept map and link pages that share concepts |
 | `NOTION_DEFAULT_PARENT_ID` | empty | Fixed default destination (page or database id/URL) |
 | `NOTION_RPS` | `2.5` | Notion requests/second per token (Notion allows about 3) |
 | `AMQP_URL` | `amqp://notetaker:notetaker@rabbitmq:5672/` | **Broker connection string** (set in compose) |
@@ -91,7 +113,7 @@ All variables are set in `.env`. Only the first three are required.
 | `MAX_VIDEO_SECONDS` | `1200` | Constraint A limit (20 min) |
 | `MAX_FRAMES` | `10` | Maximum frames per page |
 | `YOUTUBE_RPM` | `30` | Global YouTube metadata/transcript request rate |
-| `ADMIN_TOKEN` | `dev-admin` | Token for `/admin/*` |
+| `ADMIN_TOKEN` | `dev-admin` | Token for `/dashboard` and `/admin/*` |
 | `TOKEN_ENC_KEY` | derived | Fernet key used to encrypt Notion tokens at rest in Redis |
 | `WORKER_STAGES` | all four | Make a worker serve only some stages (specialised pools) |
 
@@ -117,15 +139,15 @@ curl -i -X POST localhost:8000/jobs -H 'content-type: application/json' \
 
 ## 4. Demonstrating the required failure modes (§6)
 
-All four can be triggered with the CLI (`python3 scripts/nt.py faults '{"llm_429": 2}'`, standard library only)
-or the admin API (`POST /admin/faults` with `X-Admin-Token`). Set `RETRY_BACKOFF_SECONDS=2,4,8,16` for quick runs.
+All four can be triggered from the **dashboard** (`/dashboard` → *Fault injection*) or with the CLI
+(`python3 scripts/nt.py …`, standard library only). Set `RETRY_BACKOFF_SECONDS=2,4,8,16` for quick runs.
 
 | Failure | How to trigger | What you'll see |
 |---|---|---|
-| **429 from an external API** | `nt.py faults '{"llm_429": 2}'` (also `notion_429`, `youtube_429`), then submit a video | `GET /jobs/{id}` shows *“Waiting — the AI model is rate-limiting us, retrying in 10s (retry 1/8)”*. The job stays in its stage and then completes. The message goes to a TTL retry queue, so no worker is held. |
-| **Worker crash** | `python3 scripts/nt.py chaos <url>` runs `docker kill` on **the exact worker holding the job** during EXTRACTING_FRAMES. Alternatively, arm `crash_stage` | RabbitMQ requeues the unacked message. The surviving worker sees the dead holder's missing heartbeat, takes over the lease (about 5s), and resumes. Frames already captured are reused from per-frame checkpoints. The result is one Notion page. |
-| **Graceful degradation** | `frame_fail_rate: 0.5`, or `frame_fail_all: true` | COMPLETED_WITH_WARNINGS with the text and whichever frames succeeded. If every frame fails, the page is text-only. The page lists omitted timestamps and **never substitutes an image**. |
-| **Dead-letter queue** | Submit a private or non-existent video, e.g. `https://www.youtube.com/watch?v=xxxxxxxxxx0` | Retries at 2s, 4s, 8s, 16s, then DEAD_LETTERED. The message sits in `nt.dlq` (visible in the RabbitMQ UI), and `POST /admin/dlq/{job_id}/replay` re-queues it. |
+| **429 from an external API** | Dashboard: *Force next N LLM / Notion / YouTube calls → 429*, then submit a video | The popup shows *“Waiting — the AI model is rate-limiting us, retrying in 10s (retry 1/8)”*. The job stays in its stage and then completes. The message goes to a TTL retry queue, so no worker is held. |
+| **Worker crash** | `python3 scripts/nt.py chaos <url>` runs `docker kill` on **the exact worker holding the job** during EXTRACTING_FRAMES. Alternatively, arm *Crash worker mid-stage* | RabbitMQ requeues the unacked message. The surviving worker sees the dead holder's missing heartbeat, takes over the lease (about 5s), and resumes. Frames already captured are reused from per-frame checkpoints. The result is one Notion page. |
+| **Graceful degradation** | *Frame failure rate 0.5*, or *All frames fail* | COMPLETED_WITH_WARNINGS with the text and whichever frames succeeded. If every frame fails, the page is text-only. The page lists omitted timestamps and **never substitutes an image**. |
+| **Dead-letter queue** | Submit a private or non-existent video, e.g. `https://www.youtube.com/watch?v=xxxxxxxxxx0` | Retries at 2s, 4s, 8s, 16s, then DEAD_LETTERED. The message sits in `nt.dlq` (visible in the RabbitMQ UI), and the dashboard offers **Replay**. |
 
 Scaling: `docker compose up -d --scale worker=4`. Burst test: `python3 scripts/nt.py burst <url1> <url2> …` prints
 drain time, p50 and max latency, and the **provider-429 count, which should be 0**.
@@ -170,23 +192,49 @@ longer than 45s are turned into a broker-delayed retry instead of holding a work
   over-length videos up front using the `<video>` duration.
 - LLM: map-reduce over transcript chunks in order, with strict JSON output and validation. Timestamps outside the
   video are dropped and reported.
-- Frames: chosen from the transcript-flagged moments, then captured at full quality with `ffmpeg -ss` seeking **directly in
+- Frames: chosen **visual-first** (below), then captured at full quality with `ffmpeg -ss` seeking **directly in
   the remote stream URL**, without downloading the video.
 
 **Beyond the spec.**
-1. **Robust long and non-English transcripts.** Chunk size is token-aware (non-Latin scripts weigh 3×), an empty
+1. **Visual-first frame selection.** A transcript-only LLM has to *guess* when a slide is visible; on talking-head,
+   picture-in-picture and screen-recording videos most guesses land on the presenter. Following lecture-video
+   keyframe work (slide-transition detection; keyframe selection with LLM validation), the frames stage:
+   (a) decodes a ≤240p rendition at one frame every 2 s (~2 s for a 20-minute video, exact timestamps);
+   (b) groups near-identical frames into *visual states* using a perceptual hash **and** an edge-map IoU (white
+   slides look alike to pHash alone) and measures how long each stays on screen; (c) finds the dominant
+   "presenter" look and scores states by distinctiveness from it, text/edge density and dwell time; (d) sends the
+   best 16 to the vision model as **one numbered contact sheet** to rate 0–3; (e) snaps each transcript-flagged
+   moment to the best-rated state within −12/+25 s and adds well-rated states the transcript never mentioned.
+   On a 17-minute talking-head video this changed the published frames from 4/5 presenter shots to 8/8 slides
+   and diagrams. Analysis images are throwaway; every published image is still a full-quality frame captured at
+   its timestamp. If the scan fails, selection falls back to the transcript-only behaviour.
+2. **Concept map + cross-video links (a small knowledge graph).** After summarising, the LLM proposes concepts
+   and typed relations (`prerequisite_of`, `part_of`, `uses`, …). Because transcript-only extraction is noisy,
+   the graph is grounded: each concept is anchored to the section that explains it, prerequisite edges that
+   contradict the video's teaching order are dropped, and ids/duplicates/self-loops are cleaned. Notion renders
+   it as a **Mermaid diagram** (a code block, not an image, so Constraint B is unaffected) with a concept index
+   that deep-links to "first explained at mm:ss". Every page registers its concepts per Notion workspace, and new
+   pages get **“Related videos in your notes”** links to earlier pages that cover the same ideas.
+3. **Transcripts that survive YouTube blocks.** YouTube rate-limits caption requests per public IP (a whole
+   campus NAT was blocked during our testing) and some videos have no captions. The chain is now: captions API →
+   yt-dlp caption tracks → **local speech-to-text** (faster-whisper `base`, baked into the image) on the audio-only
+   stream, which comes from the media CDN and kept working (16.8 min of audio: 3 s download, ~60–95 s transcription
+   on CPU). Transcripts are cached per video id for 7 days, so demos and bursts that repeat a video make no caption
+   request at all.
+4. **Robust long and non-English transcripts.** Chunk size is token-aware (non-Latin scripts weigh 3×), an empty
    or truncated chunk result is split in half and retried instead of being silently dropped, and notes are written
-   in `NOTES_LANGUAGE` (e.g. a Hindi-captioned video yields English notes). Transcripts are cached per video id.
-2. **Frame quality gate**: grab t, t+2s and t+4s, reject black or blank transition frames, keep the sharpest
+   in `NOTES_LANGUAGE` (e.g. a Hindi-captioned video yields English notes).
+5. **Frame quality gate**: grab t, t+2s and t+4s, reject black or blank transition frames, keep the sharpest
    (Laplacian variance), and drop duplicate slides using a perceptual hash.
-3. **Vision-grounded captions**: batched multimodal calls rewrite each caption to describe what is *actually
+6. **Vision-grounded captions**: batched multimodal calls rewrite each caption to describe what is *actually
    visible*. Captions written from the transcript alone can mismatch the frame.
-4. **Study-ready page**: TL;DR, table of contents, timestamp deep links, frames placed inside their section, key
+7. **Study-ready page**: TL;DR, table of contents, timestamp deep links, frames placed inside their section, key
    terms, review-question toggles, and a disclosure of omitted frames.
-5. **Notion tokens encrypted at rest** (Fernet) and wiped when the job finishes.
-
-Further modules (Chrome extension, ops dashboard, visual-first frame selection, concept graph, speech-to-text
-fallback, Constraint A/B verifier) are specified in [ROADMAP.md](ROADMAP.md).
+8. **Ops console** with live workers, queues, job timelines, DLQ replay and fault injection.
+9. **Notion tokens encrypted at rest** (Fernet) and wiped when the job finishes.
+10. **Self-verification of Constraints A and B**: `make verify JOB=<id> NOTION_TOKEN=…` re-downloads each published
+   image, checks it hash-matches the captured frame, **re-captures the same timestamp from the source video** to prove
+   where it came from, and asks a vision LLM to grade caption accuracy.
 
 ---
 
@@ -194,23 +242,33 @@ fallback, Constraint A/B verifier) are specified in [ROADMAP.md](ROADMAP.md).
 
 ```
 backend/notetaker/
-  gateway/app.py        REST API, OAuth exchange, health, metrics, admin API
+  gateway/app.py        REST API, OAuth exchange, health, metrics, admin (+ static/dashboard.html)
   worker/main.py        consumer runtime: leases, failover, retries, DLQ, heartbeats, graceful drain
   worker/pipeline.py    transcribe → summarize → frames → publish
   store.py              Redis job store + Lua state machine
   broker.py             RabbitMQ topology and publishing
   ratelimit.py          GCRA multi-bucket limiter + shared cooldown
-  youtube.py · llm.py · frames.py · notion.py · faults.py
-  visual.py · graph.py · asr.py   interfaces for the modules in ROADMAP.md (wired in, disabled by default)
-backend/tests/          pure logic + Redis-backed tests (state machine, fencing, limiter, chunking, blocks)  → make test
+  visual.py             visual-first frame selection (scan, visual states, contact-sheet triage, snapping)
+  graph.py              concept graph: grounding, Mermaid rendering, cross-video concept index
+  asr.py                speech-to-text fallback (audio-only stream → faster-whisper)
+  youtube.py · llm.py · frames.py · notion.py · faults.py · tools/verify.py
+backend/tests/          50 tests (pure logic + Redis-backed: state machine, fencing, limiter, selection, graph)  → make test
+extension/              MV3, no build step: content.js, background.js, popup.*, options.*
 scripts/nt.py           submit / watch / burst / chaos / faults CLI
+scripts/gpu_tunnel.sh   self-hosted LLM: private Ollama on a chosen GPU + auto-reconnecting SSH tunnel
+deploy/ollama/Modelfile the self-hosted model definition (Qwen3-VL-30B-A3B, 8k context)
 ```
 
 ## 7. Troubleshooting
 
 - **`workers.alive: 0`**: run `docker compose up -d --scale worker=2` (a worker killed in a chaos demo stays down on purpose).
-- **IpBlocked / 429 on transcripts**: YouTube rate-limits caption requests per public IP. Try another network or set `YTDLP_COOKIES_FILE`.
-- **NO_TRANSCRIPT**: the video has no captions.
+- **“transcribed the audio with whisper-base”** in the job events: YouTube blocked or lacks captions; the
+  speech-to-text fallback handled it (adds ~1 min). Other networks or `YTDLP_COOKIES_FILE` avoid the block.
+- **NO_TRANSCRIPT**: no captions and no intelligible speech in the audio.
 - **YouTube “confirm you're not a bot”**: this is treated as a rate limit and retried. On cloud IPs, set
   `YTDLP_COOKIES_FILE` (mount a cookies.txt into the worker).
+- **LLM_UNAVAILABLE / APITimeoutError with a self-hosted model**: run `scripts/gpu_tunnel.sh check`. On a shared GPU
+  server the model may have been pushed onto the CPU by other jobs; start a private instance on a free GPU with
+  `scripts/gpu_tunnel.sh serve <gpu>` (it reuses the model files via `OLLAMA_MODELS_DIR`).
+- **Concept map shows as code**: in Notion, switch the Mermaid block to *Preview*.
 - **NOTION_PARENT_NOT_FOUND**: share the destination page with the integration (page ••• → Connections).
